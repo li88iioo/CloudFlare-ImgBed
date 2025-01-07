@@ -45,6 +45,29 @@
     <summary>更新日志</summary>
 
 
+## 2024.12.27
+
+Add Features:
+
+- 支持通过环境变量自定义全局默认链接前缀（见3.1.3.6自定义配置接口）
+- 管理端支持自定义链接前缀
+- 管理端部分页面展示效果优化
+- `/upload`API支持返回完整链接（请求时设置`returnFormat`参数，详见API文档）
+
+Fix Bugs:
+
+- 优化上传页面显示效果
+
+## 2024.12.20
+
+Add Features:
+
+- 管理端支持拉黑上传IP（Dashboard->用户管理->允许上传）
+- 管理端批量操作支持按照用户选择的顺序进行（[#issue124](https://github.com/MarSeventh/CloudFlare-ImgBed/issues/124)）
+- `random`接口优化，减少KV操作次数，增加`content`参数，支持返回指定类型的文件
+- 接入CloudFlare Cache API，提升 list 相关接口访问速度
+- 正常读取返回图片的CDN缓存时间从1年调整为7天，防止缓存清除不成功的情况下图片长时间内仍可以访问的问题
+
 ## 2024.12.14
 
 Add Features:
@@ -246,7 +269,7 @@ Add Features:
 - **支持身份认证、防滥用**
   - 支持Web和API**上传认证**（感谢[hl128k](https://github.com/hl128k)）
   - 支持访问域名限制（感谢[hl128k](https://github.com/hl128k)）
-  - 支持上传IP统计
+  - 支持上传IP统计，支持禁止指定IP上传
   
 - **支持页面自定义**
   - **背景自定义**
@@ -445,7 +468,8 @@ Add Features:
 ### 3.1.3可选配置
 
 <details>
-    <summary>后台认证、自定义页面等设置</summary>
+    <summary>后台认证、自定义页面、缓存清除等设置</summary>
+
 
 
 #### 3.1.3.1后台管理认证
@@ -486,7 +510,7 @@ Web端在登录页面输入你的**认证码**即可登录使用；API端需要�
 
 环境变量增加`WhiteList_Mode`，设置为`true`即可开启白名单模式，仅设置为白名单的图片可被访问。
 
-#### 3.1.3.6页面自定义（DIY接口）
+#### 3.1.3.6自定义配置接口
 
 <details>
     <summary>设置方式</summary>
@@ -504,6 +528,7 @@ Web端在登录页面输入你的**认证码**即可登录使用；API端需要�
 | siteTitle   | 网站标题             | 字符串        | 只支持`字符串`类型，设置为你自定义的网站标题                 |
 | siteIcon    | 网站图标             | 字符串        | 只支持`字符串`类型，设置为你自定义的网站图标链接             |
 | footerLink  | 页脚传送门链接       | 字符串        | 只支持`字符串`类型，设置为你自定义的传送地址（如个人博客链接） |
+| urlPrefix   | 全局默认链接前缀     | 字符串        | 只支持`字符串`类型，设置为自定义的全局默认链接前缀，该前缀会覆盖原始默认前缀，但不会覆盖用户自定义的链接前缀 |
 
 > 整体示例：
 >
@@ -532,7 +557,7 @@ Web端在登录页面输入你的**认证码**即可登录使用；API端需要�
 
 设置`AllowRandom`环境变量，值为`true`，以从图床中随机获取一张图片，详见[API文档](#4.2.2随机图API)。
 
-#### 3.1.3.9管理端删除、拉黑等操作优化
+#### 3.1.3.9管理端删除、拉黑等操作优化（缓存删除）
 
 正常情况下，因为CloudFlare CDN缓存的存在，在管理端进行删除、拉黑、加白名单等操作不会立即生效，需要等到缓存过期才能生效。
 
@@ -605,7 +630,7 @@ Web端在登录页面输入你的**认证码**即可登录使用；API端需要�
 | ------------ | ------------------------------------------------------------ |
 | **接口功能** | 上传图片或视频                                               |
 | **请求方法** | POST                                                         |
-| **请求参数** | **Query参数**：<br />`authCode`: string类型，即为你设置的认证码<br />`serverCompress`: boolean类型，表示是否开启服务端压缩（仅针对图片文件、Telegram上传渠道生效，默认为`true`）<br />`uploadChannel`: string类型，取值为`telegram`和`cfr2`，分别代表telegram bot渠道和Cloudflare R2渠道，默认为`telegram` 渠道<br />`autoRetry`: boolean类型，表示是否开启上传失败自动切换渠道重试，默认开启<br />`uploadNameType`: string类型，表示文件命名方式，可选值为`[default, index, origin]`，分别代表默认`前缀_原名`命名、`仅前缀`命名和`仅原名`命名法，默认为`default`<br />**Body参数(application/form-data)**：<br />`file`: file类型，你要上传的文件 |
+| **请求参数** | **Query参数**：<br />`authCode`: string类型，即为你设置的认证码<br />`serverCompress`: boolean类型，表示是否开启服务端压缩（仅针对图片文件、Telegram上传渠道生效，默认为`true`）<br />`uploadChannel`: string类型，取值为`telegram`和`cfr2`，分别代表telegram bot渠道和Cloudflare R2渠道，默认为`telegram` 渠道<br />`autoRetry`: boolean类型，表示是否开启上传失败自动切换渠道重试，默认开启<br />`uploadNameType`: string类型，表示文件命名方式，可选值为`[default, index, origin]`，分别代表默认`前缀_原名`命名、`仅前缀`命名和`仅原名`命名法，默认为`default`<br />`returnFormat`:string类型，表示返回链接格式，可选值为`[default, full]`，分别代表默认的`/file/id`格式、完整链接格式<br />**Body参数(application/form-data)**：<br />`file`: file类型，你要上传的文件 |
 | **返回响应** | `data[0].src`为获得的图片链接（注意不包含域名，需要自己添加） |
 
 > **请求示例**：
@@ -636,7 +661,7 @@ Web端在登录页面输入你的**认证码**即可登录使用；API端需要�
 | **接口功能** | 从图床中随机返回一张图片的链接（注意会消耗列出次数）         |
 | **前置条件** | 设置`AllowRandom`环境变量，值为`true`                        |
 | **请求方法** | GET                                                          |
-| **请求参数** | **Query参数**：<br />`type`: 设为`img`时直接返回图片（此时form不生效）；设为`url`时返回完整url链接；否则返回随机图的文件路径。<br />`form`: 设为`text`时直接返回文本，否则返回json格式内容。 |
+| **请求参数** | **Query参数**：<br />`content`:返回的文件类型，可选值有`[image, video]`，多个使用`,`分隔，默认为`image`<br />`type`: 设为`img`时直接返回图片（此时form不生效）；设为`url`时返回完整url链接；默认返回随机图的文件路径。<br />`form`: 设为`text`时直接返回文本，默认返回json格式内容。 |
 | **响应格式** | 1、当`type`为`img`时：<br />返回格式为`image/jpeg`<br />2、当`type`为其他值时：<br />当`form`不是`text`时，返回JSON格式内容，`data.url`为返回的链接/文件路径。<br />否则，直接返回链接/文件路径。 |
 
 > **请求示例**：
@@ -674,14 +699,15 @@ Web端在登录页面输入你的**认证码**即可登录使用；API端需要�
    - ~~背景切换时间自定义~~（2024.9.11已完成）
    - ~~背景透明度支持自定义~~（2024.9.12已完成）
    - ~~页脚自定义传送门~~（2024.10.20已完成）
+   - ~~全局自定义链接前缀~~（2024.12.27已完成）
 5. :white_check_mark:~~增加随机图API~~（2024.7.25已完成）
 6. :white_check_mark:~~完善多格式链接展示形式，增加ubb格式链接支持~~（2024.8.21已完成）
 7. :white_check_mark:~~完善登录逻辑，后端增加认证码校验接口~~（2024.8.21已完成）
 8. :white_check_mark:~~支持URL粘贴上传~~（2024.8.23已完成）
 9. :white_check_mark:~~支持大于5MB的图片上传前自动压缩~~（2024.8.26已完成）
 10. :white_check_mark:~~上传页面右下角工具栏样式重构，支持上传页自定义压缩（上传前+存储端）~~（2024.9.28已完成）
-11. :hourglass_flowing_sand:重构管理端，认证+显示效果优化，增加图片详情页
-12. :hourglass_flowing_sand:管理端增加访问量统计，IP记录、IP黑名单、上传IP黑名单等
+11. :white_check_mark:~~重构管理端，认证+显示效果优化，增加图片详情页~~（2024.12.20已完成）
+12. :white_check_mark:~~管理端增加访问量统计，IP记录、IP黑名单、上传IP黑名单等~~（2024.12.20已支持上传ip黑名单，访问记录由于对KV读写消耗太大，暂时搁置）
 13. :white_check_mark:~~上传页面点击链接，自动复制到剪切板~~(2024.9.27已完成)
 14. :white_check_mark:~~上传设置记忆（上传方式、链接格式等）~~（2024.9.27已完成，**两种上传方式合并**）
 15. :white_check_mark:~~若未设置密码，无需跳转进入登录页~~（2024.9.27已完成）
@@ -696,9 +722,12 @@ Web端在登录页面输入你的**认证码**即可登录使用；API端需要�
 24. :white_check_mark:~~支持自定义链接前缀~~（2024.12.4已完成）
 25. :memo:对接alist，或实现webdav（评估中）
 26. :white_check_mark:~~文件详情增加文件大小记录~~（2024.12.10已完成）
-27. :hourglass_flowing_sand:支持管理员自定义全局默认链接前缀
+27. :white_check_mark:支持管理员自定义全局默认链接前缀
 28. :white_check_mark:~~开放更多文件格式~~（2024.12.9已完成）
 29. :white_check_mark:~~进行删除、加入白名单、加入黑名单等操作时，自动清除CF CDN缓存，避免延迟生效~~（2024.12.11已完成）
+30. :white_check_mark:~~管理端批量选择时，记录用户选择的顺序~~（2024.12.20已完成）
+31. :memo:上传图片支持自定义上传路径，支持相册功能（评估中）
+32. :hourglass_flowing_sand:支持多个 Telegram Bot Token 负载均衡
 
 </details>
 
@@ -766,11 +795,9 @@ Web端在登录页面输入你的**认证码**即可登录使用；API端需要�
 
 # 7.Tips
 
-前端开源，参见[MarSeventh/Sanyue-ImgHub](https://github.com/MarSeventh/Sanyue-ImgHub)项目。
+- 前端开源，参见[MarSeventh/Sanyue-ImgHub](https://github.com/MarSeventh/Sanyue-ImgHub)项目。
 
-**打赏**：项目维护不易，喜欢本项目的话，可以作者大大一点小小的鼓励哦，您的每一份支持都是我前进的动力~
-
-<img src="static/readme/award.png" alt="award" style="width:33%;display: inline-block" />
+- **[赞助（爱发电提供支持）](https://afdian.com/a/marseventh/plan)**：项目维护不易，喜欢本项目的话，可以作者大大一点小小的鼓励哦，您的每一份支持都是我前进的动力\~ 
 
 # 8.Star History
 

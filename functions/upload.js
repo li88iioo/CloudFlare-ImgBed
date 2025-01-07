@@ -73,7 +73,12 @@ export async function onRequestPost(context) {  // Contents of context object
 
     // 获得上传IP
     const uploadIp = request.headers.get("cf-connecting-ip") || request.headers.get("x-real-ip") || request.headers.get("x-forwarded-for") || request.headers.get("x-client-ip") || request.headers.get("x-host") || request.headers.get("x-originating-ip") || request.headers.get("x-cluster-client-ip") || request.headers.get("forwarded-for") || request.headers.get("forwarded") || request.headers.get("via") || request.headers.get("requester") || request.headers.get("true-client-ip") || request.headers.get("client-ip") || request.headers.get("x-remote-ip") || request.headers.get("x-originating-ip") || request.headers.get("fastly-client-ip") || request.headers.get("akamai-origin-hop") || request.headers.get("x-remote-ip") || request.headers.get("x-remote-addr") || request.headers.get("x-remote-host") || request.headers.get("x-client-ip") || request.headers.get("x-client-ips") || request.headers.get("x-client-ip")
-    
+    // 判断上传ip是否被封禁
+    const isBlockedIp = await isBlockedUploadIp(env, uploadIp);
+    if (isBlockedIp) {
+        return new Response('Error: Your IP is blocked', { status: 403 });
+    }
+
     // 获得上传渠道
     const urlParamUploadChannel = url.searchParams.get('uploadChannel');
     let uploadChannel = 'TelegramNew';
@@ -141,10 +146,19 @@ export async function onRequestPost(context) {  // Contents of context object
         fullId = fileName? unique_index + '_' + fileName : unique_index + '.' + fileExt;
     }
 
+    // 获得返回链接格式, default为返回/file/id, full为返回完整链接
+    const returnFormat = url.searchParams.get('returnFormat') || 'default';
+    let returnLink = '';
+    if (returnFormat === 'full') {
+        returnLink = `${url.origin}/file/${fullId}`;
+    } else {
+        returnLink = `/file/${fullId}`;
+    }
+
     // 清除CDN缓存
     const cdnUrl = `https://${url.hostname}/file/${fullId}`;
-    await purgeCDNCache(env, cdnUrl);
-
+    await purgeCDNCache(env, cdnUrl, url);
+   
 
     // ====================================不同渠道上传=======================================
     // 出错是否切换渠道自动重试，默认开启
@@ -154,7 +168,7 @@ export async function onRequestPost(context) {  // Contents of context object
     // 上传到不同渠道
     if (uploadChannel === 'CloudflareR2') {
         // -------------CloudFlare R2 渠道---------------
-        const res = await uploadFileToCloudflareR2(env, formdata, fullId, metadata);
+        const res = await uploadFileToCloudflareR2(env, formdata, fullId, metadata, returnLink);
         if (res.status === 200 || !autoRetry) {
             return res;
         } else {
@@ -162,7 +176,7 @@ export async function onRequestPost(context) {  // Contents of context object
         }
     } else {
         // ----------------Telegram New 渠道-------------------
-        const res = await uploadFileToTelegram(env, formdata, fullId, metadata, fileExt, fileName, fileType, url, clonedRequest);
+        const res = await uploadFileToTelegram(env, formdata, fullId, metadata, fileExt, fileName, fileType, url, clonedRequest, returnLink);
         if (res.status === 200 || !autoRetry) {
             return res;
         } else {
@@ -171,13 +185,13 @@ export async function onRequestPost(context) {  // Contents of context object
     }
 
     // 上传失败，开始自动切换渠道重试
-    const res = await tryRetry(err, env, uploadChannel, formdata, fullId, metadata, fileExt, fileName, fileType, url, clonedRequest);
+    const res = await tryRetry(err, env, uploadChannel, formdata, fullId, metadata, fileExt, fileName, fileType, url, clonedRequest, returnLink);
     return res;
 }
 
 
 // 自动切换渠道重试
-async function tryRetry(err, env, uploadChannel, formdata, fullId, metadata, fileExt, fileName, fileType, url, clonedRequest) {
+async function tryRetry(err, env, uploadChannel, formdata, fullId, metadata, fileExt, fileName, fileType, url, clonedRequest, returnLink) {
     // 渠道列表
     const channelList = ['CloudflareR2', 'TelegramNew'];
     const errMessages = {};
@@ -186,9 +200,9 @@ async function tryRetry(err, env, uploadChannel, formdata, fullId, metadata, fil
         if (channelList[i] !== uploadChannel) {
             let res = null;
             if (channelList[i] === 'CloudflareR2') {
-                res = await uploadFileToCloudflareR2(env, formdata, fullId, metadata);
+                res = await uploadFileToCloudflareR2(env, formdata, fullId, metadata, returnLink);
             } else if (channelList[i] === 'TelegramNew') {
-                res = await uploadFileToTelegram(env, formdata, fullId, metadata, fileExt, fileName, fileType, url, clonedRequest);
+                res = await uploadFileToTelegram(env, formdata, fullId, metadata, fileExt, fileName, fileType, url, clonedRequest, returnLink);
             }
             if (res.status === 200) {
                 return res;
@@ -203,7 +217,7 @@ async function tryRetry(err, env, uploadChannel, formdata, fullId, metadata, fil
 
 
 // 上传到Cloudflare R2
-async function uploadFileToCloudflareR2(env, formdata, fullId, metadata) {
+async function uploadFileToCloudflareR2(env, formdata, fullId, metadata, returnLink) {
     // 检查R2数据库是否配置
     if (typeof env.img_r2 == "undefined" || env.img_r2 == null || env.img_r2 == "") {
         return new Response('Error: Please configure R2 database', { status: 500 });
@@ -232,7 +246,7 @@ async function uploadFileToCloudflareR2(env, formdata, fullId, metadata) {
 
     // 成功上传，将文件ID返回给客户端
     return new Response(
-        JSON.stringify([{ 'src': `/file/${fullId}` }]), 
+        JSON.stringify([{ 'src': `${returnLink}` }]), 
         {
             status: 200,
             headers: { 'Content-Type': 'application/json' }
@@ -242,7 +256,7 @@ async function uploadFileToCloudflareR2(env, formdata, fullId, metadata) {
 
 
 // 上传到Telegram
-async function uploadFileToTelegram(env, formdata, fullId, metadata, fileExt, fileName, fileType, url, clonedRequest) {
+async function uploadFileToTelegram(env, formdata, fullId, metadata, fileExt, fileName, fileType, url, clonedRequest, returnLink) {
     // 由于TG会把gif后缀的文件转为视频，所以需要修改后缀名绕过限制
     if (fileExt === 'gif') {
         const newFileName = fileName.replace(/\.gif$/, '.jpeg');
@@ -318,7 +332,7 @@ async function uploadFileToTelegram(env, formdata, fullId, metadata, fileExt, fi
         // 若上传成功，将响应返回给客户端
         if (response.ok) {
             res = new Response(
-                JSON.stringify([{ 'src': `/file/${fullId}` }]), 
+                JSON.stringify([{ 'src': `${returnLink}` }]),
                 {
                     status: 200,
                     headers: { 'Content-Type': 'application/json' }
@@ -435,7 +449,7 @@ async function getFilePath(env, file_id) {
       }
 }
 
-async function purgeCDNCache(env, cdnUrl) {
+async function purgeCDNCache(env, cdnUrl, url) {
     const options = {
         method: 'POST',
         headers: {'Content-Type': 'application/json', 'X-Auth-Email': `${env.CF_EMAIL}`, 'X-Auth-Key': `${env.CF_API_KEY}`},
@@ -443,6 +457,18 @@ async function purgeCDNCache(env, cdnUrl) {
     };
 
     await fetch(`https://api.cloudflare.com/client/v4/zones/${ env.CF_ZONE_ID }/purge_cache`, options);
+
+    // 清除api/randomFileList API缓存
+    try {
+        const cache = caches.default;
+        // await cache.delete(`${url.origin}/api/randomFileList`); delete有bug，通过写入一个max-age=0的response来清除缓存
+        const nullResponse = new Response(null, {
+            headers: { 'Cache-Control': 'max-age=0' },
+        });
+        await cache.put(`${url.origin}/api/randomFileList`, nullResponse);
+    } catch (error) {
+        console.error('Failed to clear cache:', error);
+    }
 }
 
 function isExtValid(fileExt) {
@@ -452,4 +478,21 @@ function isExtValid(fileExt) {
     'doc', 'docx', 'ppt', 'pptx', 'xls', 'xlsx', 'pdf', 
     'txt', 'md', 'json', 'xml', 'html', 'css', 'js', 'ts', 'go', 'java', 'php', 'py', 'rb', 'sh', 'bat', 'cmd', 'ps1', 'psm1', 'psd', 'ai', 'sketch', 'fig', 'svg', 'eps', 'zip', 'rar', '7z', 'tar', 'gz', 'bz2', 'xz', 'apk', 'exe', 'msi', 'dmg', 'iso', 'torrent', 'webp', 'ico', 'svg', 'ttf', 'otf', 'woff', 'woff2', 'eot', 'apk', 'crx', 'xpi', 'deb', 'rpm', 'jar', 'war', 'ear', 'img', 'iso', 'vdi', 'ova', 'ovf', 'qcow2', 'vmdk', 'vhd', 'vhdx', 'pvm', 'dsk', 'hdd', 'bin', 'cue', 'mds', 'mdf', 'nrg', 'ccd', 'cif', 'c2d', 'daa', 'b6t', 'b5t', 'bwt', 'isz', 'isz', 'cdi', 'flp', 'uif', 'xdi', 'sdi'
     ].includes(fileExt);
+}
+
+async function isBlockedUploadIp(env, uploadIp) {
+    // 检查是否配置了KV数据库
+    if (typeof env.img_url == "undefined" || env.img_url == null || env.img_url == "") {
+        return false;
+    }
+
+    const kv = env.img_url;
+    let list = await kv.get("manage@blockipList");
+    if (list == null) {
+        list = [];
+    } else {
+        list = list.split(",");
+    }
+
+    return list.includes(uploadIp);
 }
